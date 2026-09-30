@@ -7,8 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 120
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
@@ -17,42 +16,49 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.10'
 
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
             git zip unzip openjdk-17-jdk \
-            autoconf libtool pkg-config \
-            zlib1g-dev libncurses5-dev libncursesw5-dev \
-            cmake libffi-dev libssl-dev \
-            build-essential ccache
+            autoconf libtool pkg-config zlib1g-dev \
+            libncurses5-dev libncursesw5-dev libtinfo5 \
+            cmake libffi-dev libssl-dev build-essential ccache
 
-      - name: Cache Buildozer
+      - name: Cache Buildozer global
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.buildozer
-            .buildozer
-          key: buildozer-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
-          restore-keys: |
-            buildozer-${{ runner.os }}-
+          path: ~/.buildozer
+          key: bz-global-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
 
-      - name: Install buildozer
+      - name: Cache Buildozer local
+        uses: actions/cache@v4
+        with:
+          path: .buildozer
+          key: bz-local-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+
+      - name: Install Buildozer
         run: |
-          pip install --upgrade pip
-          pip install buildozer cython==0.29.36
+          python -m pip install --upgrade pip
+          pip install buildozer cython==0.29.36 virtualenv
+
+      - name: Pre-accept Android SDK licenses
+        run: |
+          mkdir -p ~/.android
+          touch ~/.android/repositories.cfg
+          echo "y" | sudo tee /dev/null
 
       - name: Build APK
         run: |
           yes | buildozer -v android debug
-        continue-on-error: false
+        env:
+          BUILDOZER_WARN_ON_ROOT: 0
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
-        if: success()
         with:
-          name: block-blast-apk
+          name: apk
           path: bin/*.apk
-          retention-days: 30
+          if-no-files-found: error
