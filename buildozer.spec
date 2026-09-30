@@ -22,7 +22,7 @@ android.allow_backup = True
 android.release_artifact = apk
 android.debug_artifact = apk
 
-p4a.branch = v2023.09.15
+p4a.branch = master
 p4a.bootstrap = sdl2
 
 [buildozer]
