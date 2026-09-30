@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout
@@ -24,8 +24,9 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
             git zip unzip openjdk-17-jdk \
             autoconf libtool pkg-config zlib1g-dev \
-            libncurses5-dev libncursesw5-dev libtinfo5 \
-            cmake libffi-dev libssl-dev build-essential ccache
+            libncurses-dev libtinfo6 cmake \
+            libffi-dev libssl-dev build-essential ccache \
+            software-properties-common
 
       - name: Cache Buildozer global
         uses: actions/cache@v4
@@ -44,15 +45,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install buildozer cython==0.29.36 virtualenv
 
-      - name: Pre-accept Android SDK licenses
-        run: |
-          mkdir -p ~/.android
-          touch ~/.android/repositories.cfg
-          echo "y" | sudo tee /dev/null
-
       - name: Build APK
         run: |
-          yes | buildozer -v android debug
+          buildozer -v android debug
         env:
           BUILDOZER_WARN_ON_ROOT: 0
 
