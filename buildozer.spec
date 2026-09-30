@@ -22,9 +22,8 @@ android.allow_backup = True
 android.release_artifact = apk
 android.debug_artifact = apk
 
-p4a.branch = master
+p4a.branch = v2024.01.21
 p4a.bootstrap = sdl2
-p4a.python_version = 3.11.5
 
 [buildozer]
 log_level = 2
