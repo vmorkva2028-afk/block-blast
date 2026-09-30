@@ -8,21 +8,21 @@ source.include_exts = py,png,jpg,kv,atlas,json,txt
 
 version = 0.1
 
-requirements = python3==3.10.21,cython==0.29.34,pygame-ce
+requirements = python3,pygame-ce
 
 orientation = portrait
 fullscreen = 1
 
 android.api = 30
 android.minapi = 21
-android.ndk = 23b
+android.ndk = 25b
 android.archs = arm64-v8a
 android.accept_sdk_license = True
 android.allow_backup = True
 android.release_artifact = apk
 android.debug_artifact = apk
 
-p4a.branch = develop
+p4a.branch = v2023.09.15
 p4a.bootstrap = sdl2
 
 [buildozer]
