@@ -1,22 +1,30 @@
 [app]
-title = BlockBl
-package.name = blockbl
-package.domain = org.vmorkvaz
+title = Block Blast
+package.name = blockblast
+package.domain = org.vmorkva
+
 source.dir = .
-source.include_exts = py,png,jpg,kv,atlas,json,ttf,so
+source.include_exts = py,png,jpg,kv,atlas,json,txt
+
 version = 0.1
 
-requirements = python3,kivy
+requirements = python3,pygame-ce
 
 orientation = portrait
-fullscreen = 0
+fullscreen = 1
 
-android.api = 31
+android.api = 30
 android.minapi = 21
-android.ndk = 23b
-android.archs = arm64-v8a, armeabi-v7a
+android.ndk = 25b
+android.archs = arm64-v8a
 android.accept_sdk_license = True
 android.allow_backup = True
+android.release_artifact = apk
+android.debug_artifact = apk
+
+p4a.branch = master
+p4a.bootstrap = sdl2
+p4a.python_version = 3.11.5
 
 [buildozer]
 log_level = 2
