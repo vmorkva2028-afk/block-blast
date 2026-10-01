@@ -6,8 +6,14 @@ import math
 import array
 
 pygame.init()
-pygame.mixer.pre_init(22050, -16, 1, 512)
-pygame.mixer.init()
+
+# --- Защита звука: на Android mixer часто падает ---
+AUDIO_OK = True
+try:
+    pygame.mixer.pre_init(22050, -16, 1, 512)
+    pygame.mixer.init()
+except Exception:
+    AUDIO_OK = False
 
 info = pygame.display.Info()
 WIDTH = info.current_w
@@ -48,11 +54,23 @@ def make_sound(freq, duration, volume=0.4):
     return pygame.mixer.Sound(buffer=buf.tobytes())
 
 
-SOUND_CLICK = make_sound(880, 0.05, 0.3)
-SOUND_PLACE = make_sound(440, 0.08, 0.35)
-SOUND_CLEAR = make_sound(1200, 0.15, 0.45)
-SOUND_COMBO = make_sound(1600, 0.25, 0.5)
-SOUND_OVER = make_sound(180, 0.6, 0.4)
+class _Silent:
+    def play(self):
+        pass
+
+
+if AUDIO_OK:
+    try:
+        SOUND_CLICK = make_sound(880, 0.05, 0.3)
+        SOUND_PLACE = make_sound(440, 0.08, 0.35)
+        SOUND_CLEAR = make_sound(1200, 0.15, 0.45)
+        SOUND_COMBO = make_sound(1600, 0.25, 0.5)
+        SOUND_OVER = make_sound(180, 0.6, 0.4)
+    except Exception:
+        AUDIO_OK = False
+
+if not AUDIO_OK:
+    SOUND_CLICK = SOUND_PLACE = SOUND_CLEAR = SOUND_COMBO = SOUND_OVER = _Silent()
 
 SHAPES = [
     [(0, 0)],
