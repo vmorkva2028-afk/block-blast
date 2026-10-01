@@ -13,14 +13,17 @@ requirements = python3,pygame-ce
 orientation = portrait
 fullscreen = 1
 
-android.api = 30
-android.minapi = 21
+android.api = 34
+android.minapi = 24
 android.ndk = 25b
 android.archs = arm64-v8a
 android.accept_sdk_license = True
 android.allow_backup = True
 android.release_artifact = apk
 android.debug_artifact = apk
+
+android.gradle_dependencies = 
+android.enable_androidx = True
 
 p4a.branch = v2024.01.21
 p4a.bootstrap = sdl2
