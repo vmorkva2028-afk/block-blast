@@ -8,7 +8,7 @@ source.include_exts = py,png,jpg,kv,atlas,json,txt
 
 version = 0.1
 
-requirements = python3,pygame-ce
+requirements = python3,kivy
 
 orientation = portrait
 fullscreen = 1
