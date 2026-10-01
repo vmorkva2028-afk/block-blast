@@ -7,7 +7,7 @@ import array
 
 pygame.init()
 
-# --- Защита звука: на Android mixer часто падает ---
+# --- Звук: если не заведётся — работаем молча ---
 AUDIO_OK = True
 try:
     pygame.mixer.pre_init(22050, -16, 1, 512)
@@ -15,9 +15,19 @@ try:
 except Exception:
     AUDIO_OK = False
 
-info = pygame.display.Info()
-WIDTH = info.current_w
-HEIGHT = info.current_h
+# --- Размер экрана: на Android info.current_w может быть 0 ---
+try:
+    info = pygame.display.Info()
+    WIDTH = info.current_w
+    HEIGHT = info.current_h
+except Exception:
+    WIDTH = 0
+    HEIGHT = 0
+
+if WIDTH < 100 or HEIGHT < 100:
+    WIDTH = 720
+    HEIGHT = 1280
+
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Block Blast")
 
@@ -34,9 +44,14 @@ CELL_BORDER = (110, 110, 140)
 TEXT_COLOR = (240, 240, 255)
 ACCENT = (255, 220, 90)
 
-font_big = pygame.font.Font(None, 90)
-font_mid = pygame.font.Font(None, 60)
-font_small = pygame.font.Font(None, 40)
+try:
+    font_big = pygame.font.SysFont(None, 90)
+    font_mid = pygame.font.SysFont(None, 60)
+    font_small = pygame.font.SysFont(None, 40)
+except Exception:
+    font_big = pygame.font.Font(None, 90)
+    font_mid = pygame.font.Font(None, 60)
+    font_small = pygame.font.Font(None, 40)
 
 DIR = os.path.dirname(os.path.abspath(__file__))
 HIGHSCORE_FILE = os.path.join(DIR, "highscore.txt")
