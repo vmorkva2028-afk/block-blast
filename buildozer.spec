@@ -8,12 +8,12 @@ source.include_exts = py,png,jpg,kv,atlas,json,txt
 
 version = 0.1
 
-requirements = python3,pygame-ce
+requirements = python3,pygame
 
 orientation = portrait
 fullscreen = 1
 
-android.api = 34
+android.api = 31
 android.minapi = 24
 android.ndk = 25b
 android.archs = arm64-v8a
@@ -22,7 +22,7 @@ android.allow_backup = True
 android.release_artifact = apk
 android.debug_artifact = apk
 
-android.gradle_dependencies = 
+android.gradle_version = 7.4.2
 android.enable_androidx = True
 
 p4a.branch = v2024.01.21
