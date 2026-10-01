@@ -819,4 +819,37 @@ class GameRoot(FloatLayout):
 
         if self.board.score >= hs and self.board.score > 0:
             new_record = Label(
-                text="✨ Новый рекор
+                text="✨ Новый рекорд! ✨",
+                font_size="24sp",
+                bold=True,
+                color=ACCENT,
+                pos_hint={"center_x": 0.5, "center_y": 0.45},
+            )
+            overlay.add_widget(new_record)
+
+        overlay.add_widget(self.make_button("Играть заново", 0.32, self.restart_game, (0.35, 0.65, 0.4)))
+        overlay.add_widget(self.make_button("В меню", 0.21, self.go_menu_from_pause))
+        self.game_over_widget = overlay
+        self.add_widget(overlay)
+
+    def restart_game(self, *a):
+        if self.game_over_widget:
+            self.remove_widget(self.game_over_widget)
+            self.game_over_widget = None
+        if self.board:
+            self.board.reset()
+            self.board.highscore = load_highscore()
+            self.board.settings = self.settings
+
+    def exit_app(self, *a):
+        App.get_running_app().stop()
+
+
+class BlockBlastApp(App):
+    def build(self):
+        Window.clearcolor = (0.05, 0.06, 0.12, 1)
+        return GameRoot()
+
+
+if __name__ == "__main__":
+    BlockBlastApp().run()
