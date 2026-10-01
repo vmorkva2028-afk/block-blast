@@ -2,16 +2,15 @@ import random
 import os
 import json
 import math
+from datetime import datetime, date
 from kivy.app import App
 from kivy.uix.widget import Widget
 from kivy.uix.label import Label
 from kivy.uix.button import Button
 from kivy.uix.floatlayout import FloatLayout
-from kivy.uix.boxlayout import BoxLayout
-from kivy.graphics import Color, Rectangle, RoundedRectangle, Ellipse
+from kivy.graphics import Color, Rectangle, RoundedRectangle
 from kivy.core.window import Window
 from kivy.clock import Clock
-from kivy.animation import Animation
 from kivy.metrics import dp
 
 GRID_N = 8
@@ -42,56 +41,96 @@ COLORS = [
 
 BG_TOP = (0.10, 0.12, 0.22)
 BG_BOT = (0.05, 0.06, 0.12)
+MENU_BG_TOP = (0.16, 0.35, 0.78)
+MENU_BG_BOT = (0.08, 0.18, 0.52)
 GRID_BG = (0.14, 0.16, 0.26)
 CELL_EMPTY = (0.22, 0.24, 0.34)
 CELL_BORDER = (0.40, 0.44, 0.60)
 TEXT_COLOR = (0.95, 0.95, 1.0)
 ACCENT = (1.0, 0.86, 0.35)
 BTN_BG = (0.35, 0.45, 0.75)
+BTN_GREEN = (0.35, 0.65, 0.4)
+BTN_RED = (0.6, 0.3, 0.3)
+BTN_ORANGE = (1.0, 0.62, 0.15)
+BTN_BLUE = (0.20, 0.65, 0.85)
 
 DIR = os.path.dirname(os.path.abspath(__file__))
 HIGHSCORE_FILE = os.path.join(DIR, "highscore.json")
 SETTINGS_FILE = os.path.join(DIR, "settings.json")
+STATS_FILE = os.path.join(DIR, "stats.json")
+DAILY_FILE = os.path.join(DIR, "daily.json")
+
+
+def load_json(path, default):
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+            if isinstance(default, dict):
+                default.update(data)
+            return default
+    except Exception:
+        return default
+
+
+def save_json(path, data):
+    try:
+        with open(path, "w") as f:
+            json.dump(data, f)
+    except Exception:
+        pass
 
 
 def load_highscore():
-    try:
-        with open(HIGHSCORE_FILE, "r") as f:
-            return json.load(f).get("highscore", 0)
-    except Exception:
-        return 0
+    return load_json(HIGHSCORE_FILE, {"highscore": 0}).get("highscore", 0)
 
 
 def save_highscore(value):
-    try:
-        with open(HIGHSCORE_FILE, "w") as f:
-            json.dump({"highscore": value}, f)
-    except Exception:
-        pass
+    save_json(HIGHSCORE_FILE, {"highscore": value})
 
 
 def load_settings():
-    try:
-        with open(SETTINGS_FILE, "r") as f:
-            return json.load(f)
-    except Exception:
-        return {"vibration": True, "sound": True}
+    return load_json(SETTINGS_FILE, {
+        "vibration": True,
+        "sound": True,
+        "bgm": True,
+        "volume": 100,
+        "graphics": "high",
+    })
 
 
 def save_settings(s):
-    try:
-        with open(SETTINGS_FILE, "w") as f:
-            json.dump(s, f)
-    except Exception:
-        pass
+    save_json(SETTINGS_FILE, s)
+
+
+def load_stats():
+    return load_json(STATS_FILE, {
+        "games": 0,
+        "total_score": 0,
+        "best_score": 0,
+        "lines_cleared": 0,
+        "max_combo": 0,
+        "total_time": 0,
+    })
+
+
+def save_stats(s):
+    save_json(STATS_FILE, s)
+
+
+def load_daily():
+    return load_json(DAILY_FILE, {"last_reward": "", "streak": 0})
+
+
+def save_daily(d):
+    save_json(DAILY_FILE, d)
 
 
 class Particle:
     def __init__(self, x, y, color):
         self.x = x
         self.y = y
-        self.vx = random.uniform(-200, 200)
-        self.vy = random.uniform(-200, 250)
+        self.vx = random.uniform(-220, 220)
+        self.vy = random.uniform(-220, 280)
         self.color = color
         self.life = 1.0
         self.size = random.randint(5, 12)
@@ -125,15 +164,18 @@ class Board(Widget):
         super().__init__(**kwargs)
         self.on_game_over = on_game_over
         self.settings = load_settings()
+        self.stats = load_stats()
         self.reset()
         self.highscore = load_highscore()
         self.bind(pos=self.update_layout, size=self.update_layout)
         Clock.schedule_interval(self.tick, 1 / 60)
+        self.game_start_time = datetime.now()
 
     def reset(self):
         self.board = [[0] * GRID_N for _ in range(GRID_N)]
         self.score = 0
         self.combo = 0
+        self.max_combo = 0
         self.tray = [Piece() for _ in range(3)]
         self.dragging = None
         self.drag_dx = 0
@@ -216,6 +258,7 @@ class Board(Widget):
 
         if lines > 0:
             self.combo += 1
+            self.max_combo = max(self.max_combo, self.combo)
             multiplier = min(self.combo, 5)
         else:
             multiplier = 1
@@ -230,6 +273,7 @@ class Board(Widget):
             gained = 0
 
         self.score += gained
+        self.stats["lines_cleared"] += lines
 
         if lines > 0:
             popup_text = f"+{gained}"
@@ -241,10 +285,11 @@ class Board(Widget):
 
             for (r, c, color) in cleared:
                 self.clear_anim.append([r, c, color, 0.0])
-                px = self.board_x + c * self.cell + self.cell / 2
-                py = self.board_y + r * self.cell + self.cell / 2
-                for _ in range(3):
-                    self.particles.append(Particle(px, py, color))
+                if self.settings.get("graphics", "high") == "high":
+                    px = self.board_x + c * self.cell + self.cell / 2
+                    py = self.board_y + r * self.cell + self.cell / 2
+                    for _ in range(3):
+                        self.particles.append(Particle(px, py, color))
 
             if lines == 2:
                 self.shake_t = 0.15
@@ -333,6 +378,12 @@ class Board(Widget):
             if self.score > self.highscore:
                 self.highscore = self.score
                 save_highscore(self.highscore)
+            self.stats["games"] += 1
+            self.stats["total_score"] += self.score
+            self.stats["best_score"] = max(self.stats["best_score"], self.score)
+            elapsed = (datetime.now() - self.game_start_time).total_seconds()
+            self.stats["total_time"] += int(elapsed)
+            save_stats(self.stats)
             if self.on_game_over:
                 self.on_game_over()
         return True
@@ -367,18 +418,22 @@ class Board(Widget):
 
     def redraw(self):
         self.canvas.clear()
+        gfx = self.settings.get("graphics", "high")
         shake_x = shake_y = 0
-        if self.shake_t > 0:
+        if gfx == "high" and self.shake_t > 0:
             amp = int(10 * (self.shake_t / 0.3))
             shake_x = random.randint(-amp, amp)
             shake_y = random.randint(-amp, amp)
 
         with self.canvas:
-            t = (math.sin(self.time * 0.6) + 1) / 2
-            r = BG_TOP[0] + (BG_BOT[0] - BG_TOP[0]) * t
-            g = BG_TOP[1] + (BG_BOT[1] - BG_TOP[1]) * t
-            b = BG_TOP[2] + (BG_BOT[2] - BG_TOP[2]) * t
-            Color(r, g, b, 1)
+            if gfx == "high":
+                t = (math.sin(self.time * 0.6) + 1) / 2
+                r = BG_TOP[0] + (BG_BOT[0] - BG_TOP[0]) * t
+                g = BG_TOP[1] + (BG_BOT[1] - BG_TOP[1]) * t
+                b = BG_TOP[2] + (BG_BOT[2] - BG_TOP[2]) * t
+                Color(r, g, b, 1)
+            else:
+                Color(*BG_TOP, 1)
             Rectangle(pos=(0, 0), size=(self.width, self.height))
 
             pad = 6
@@ -442,11 +497,12 @@ class Board(Widget):
                                      size=(self.cell - 4, self.cell - 4),
                                      radius=[8])
 
-            for p in self.particles:
-                Color(p.color[0], p.color[1], p.color[2], p.life)
-                RoundedRectangle(pos=(p.x - p.size / 2, p.y - p.size / 2),
-                                 size=(p.size, p.size),
-                                 radius=[3])
+            if gfx == "high":
+                for p in self.particles:
+                    Color(p.color[0], p.color[1], p.color[2], p.life)
+                    RoundedRectangle(pos=(p.x - p.size / 2, p.y - p.size / 2),
+                                     size=(p.size, p.size),
+                                     radius=[3])
 
             if self.hint_t > 0:
                 hint = self.find_hint()
@@ -489,12 +545,12 @@ class Board(Widget):
                             RoundedRectangle(pos=(px + 2, py + 2),
                                              size=(self.cell - 4, self.cell - 4),
                                              radius=[8])
-                # свечение вокруг фигуры
-                glow_r = 0.5 + 0.3 * abs(math.sin(self.time * 8))
-                Color(p.color[0], p.color[1], p.color[2], 0.15 * glow_r)
-                RoundedRectangle(pos=(p.x - 8, p.y - 8),
-                                 size=(p.w + 16, p.h + 16),
-                                 radius=[16])
+                if gfx != "low":
+                    glow_r = 0.5 + 0.3 * abs(math.sin(self.time * 8))
+                    Color(p.color[0], p.color[1], p.color[2], 0.15 * glow_r)
+                    RoundedRectangle(pos=(p.x - 8, p.y - 8),
+                                     size=(p.w + 16, p.h + 16),
+                                     radius=[16])
                 for dr, dc in p.shape:
                     px = p.x + dc * self.tray_cell
                     py = p.y + dr * self.tray_cell
@@ -524,137 +580,272 @@ class GameRoot(FloatLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.settings = load_settings()
+        self.stats = load_stats()
         self.state = "menu"
         self.menu_widget = None
         self.scores_widget = None
         self.settings_widget = None
+        self.stats_widget = None
         self.pause_widget = None
         self.game_over_widget = None
         self.board = None
+        self.score_label = None
+        self.record_label = None
+        self.pause_btn = None
+        self.hint_btn = None
         self.show_menu()
+
+    def make_btn(self, text, y, cb, color=BTN_BG, size=(0.7, 0.08), font="26sp"):
+        btn = Button(
+            text=text,
+            font_size=font,
+            bold=True,
+            size_hint=size,
+            pos_hint={"center_x": 0.5, "center_y": y},
+            background_color=(*color, 1),
+            background_normal="",
+            background_down="",
+        )
+        btn.bind(on_release=cb)
+        return btn
 
     def clear_overlays(self):
         for w in [self.menu_widget, self.scores_widget, self.settings_widget,
-                  self.pause_widget, self.game_over_widget]:
+                  self.stats_widget, self.pause_widget, self.game_over_widget]:
             if w and w.parent:
                 self.remove_widget(w)
         self.menu_widget = None
         self.scores_widget = None
         self.settings_widget = None
+        self.stats_widget = None
         self.pause_widget = None
         self.game_over_widget = None
 
-    def make_button(self, text, y_hint, callback, color=BTN_BG):
-        btn = Button(
-            text=text,
-            font_size="26sp",
-            size_hint=(0.7, 0.09),
-            pos_hint={"center_x": 0.5, "center_y": y_hint},
-            background_color=(*color, 1),
-            background_normal="",
-            background_down="",
-        )
-        btn.bind(on_release=callback)
-        return btn
+    def draw_bg(self, overlay, top, bot):
+        with overlay.canvas:
+            Color(*top, 1)
+            Rectangle(pos=(0, 0), size=(Window.width, Window.height))
 
     def show_menu(self):
         self.clear_overlays()
         if self.board:
             self.remove_widget(self.board)
             self.board = None
+        for lbl in [self.score_label, self.record_label, self.pause_btn, self.hint_btn]:
+            if lbl and lbl.parent:
+                self.remove_widget(lbl)
         self.state = "menu"
 
         overlay = FloatLayout()
         with overlay.canvas:
-            Color(0.05, 0.06, 0.12, 1)
-            Rectangle(pos=(0, 0), size=Window.size)
+            Color(*MENU_BG_TOP, 1)
+            Rectangle(pos=(0, 0), size=(Window.width, Window.height))
+            Color(0, 0, 0, 0.35)
+            RoundedRectangle(pos=(-50, -100), size=(Window.width + 100, Window.height * 0.55), radius=[200])
 
         title = Label(
-            text="BLOCK BLAST",
-            font_size="64sp",
+            text="BLOCK",
+            font_size="72sp",
             bold=True,
-            color=ACCENT,
-            pos_hint={"center_x": 0.5, "center_y": 0.82},
+            color=(1, 0.65, 0.1, 1),
+            outline_width=6,
+            outline_color=(0.6, 0.3, 0, 1),
+            pos_hint={"center_x": 0.5, "center_y": 0.86},
         )
         overlay.add_widget(title)
 
-        subtitle = Label(
-            text="Собирай линии, ставь рекорды",
-            font_size="18sp",
-            color=TEXT_COLOR,
-            pos_hint={"center_x": 0.5, "center_y": 0.74},
+        title2 = Label(
+            text="BLAST",
+            font_size="72sp",
+            bold=True,
+            color=(0.3, 0.85, 1.0, 1),
+            outline_width=6,
+            outline_color=(0.05, 0.3, 0.6, 1),
+            pos_hint={"center_x": 0.5, "center_y": 0.76},
         )
-        overlay.add_widget(subtitle)
+        overlay.add_widget(title2)
 
-        overlay.add_widget(self.make_button("Играть", 0.55, self.start_game, (0.35, 0.65, 0.4)))
-        overlay.add_widget(self.make_button("Рекорды", 0.44, self.show_scores))
-        overlay.add_widget(self.make_button("Настройки", 0.33, self.show_settings))
-        overlay.add_widget(self.make_button("Выход", 0.22, self.exit_app, (0.6, 0.3, 0.3)))
+        sub = Label(
+            text="ADVENTURE MASTER",
+            font_size="18sp",
+            bold=True,
+            color=(0.9, 0.95, 1, 1),
+            pos_hint={"center_x": 0.5, "center_y": 0.7},
+        )
+        overlay.add_widget(sub)
+
+        daily = load_daily()
+        streak = daily.get("streak", 0)
+        streak_lbl = Label(
+            text=f"🔥 Серия побед: {streak}",
+            font_size="20sp",
+            bold=True,
+            color=(1, 0.9, 0.4, 1),
+            pos_hint={"center_x": 0.5, "center_y": 0.62},
+        )
+        overlay.add_widget(streak_lbl)
+
+        overlay.add_widget(self.make_btn(
+            "▶  КЛАССИК", 0.5, self.start_game, BTN_GREEN, size=(0.72, 0.09), font="28sp"))
+        overlay.add_widget(self.make_btn(
+            "🎮  БОЛЬШЕ ИГР", 0.4, self.show_stats, BTN_ORANGE, size=(0.72, 0.09), font="24sp"))
+        overlay.add_widget(self.make_btn(
+            "🏆  РЕКОРДЫ", 0.3, self.show_scores, BTN_BLUE, size=(0.72, 0.09), font="24sp"))
+        overlay.add_widget(self.make_btn(
+            "⚙  НАСТРОЙКИ", 0.2, self.show_settings, (0.4, 0.45, 0.65), size=(0.72, 0.09), font="24sp"))
 
         self.menu_widget = overlay
+        self.add_widget(overlay)
+
+    def show_stats(self):
+        self.clear_overlays()
+        overlay = FloatLayout()
+        self.draw_bg(overlay, MENU_BG_TOP, MENU_BG_BOT)
+
+        title = Label(
+            text="СТАТИСТИКА",
+            font_size="42sp",
+            bold=True,
+            color=ACCENT,
+            outline_width=4,
+            outline_color=(0.3, 0.15, 0, 1),
+            pos_hint={"center_x": 0.5, "center_y": 0.88},
+        )
+        overlay.add_widget(title)
+
+        s = self.stats
+        rows = [
+            f"🎮 Игр сыграно: {s.get('games', 0)}",
+            f"🏆 Лучший счёт: {s.get('best_score', 0)}",
+            f"⭐ Всего очков: {s.get('total_score', 0)}",
+            f"📊 Линий очищено: {s.get('lines_cleared', 0)}",
+            f"🔥 Макс. комбо: x{s.get('max_combo', 0)}",
+            f"⏱ Время в игре: {s.get('total_time', 0) // 60} мин",
+        ]
+        y = 0.75
+        for r in rows:
+            lbl = Label(
+                text=r,
+                font_size="22sp",
+                color=TEXT_COLOR,
+                pos_hint={"center_x": 0.5, "center_y": y},
+            )
+            overlay.add_widget(lbl)
+            y -= 0.08
+
+        overlay.add_widget(self.make_btn("Назад", 0.18, self.show_menu, BTN_GREEN))
+        self.stats_widget = overlay
         self.add_widget(overlay)
 
     def show_scores(self):
         self.clear_overlays()
         overlay = FloatLayout()
-        with overlay.canvas:
-            Color(0.05, 0.06, 0.12, 1)
-            Rectangle(pos=(0, 0), size=Window.size)
+        self.draw_bg(overlay, MENU_BG_TOP, MENU_BG_BOT)
 
         title = Label(
-            text="Рекорды",
+            text="РЕКОРДЫ",
             font_size="52sp",
             bold=True,
             color=ACCENT,
+            outline_width=5,
+            outline_color=(0.3, 0.15, 0, 1),
             pos_hint={"center_x": 0.5, "center_y": 0.82},
         )
         overlay.add_widget(title)
 
         hs = load_highscore()
-        score_lbl = Label(
-            text=f"Лучший счёт: {hs}",
-            font_size="36sp",
-            color=TEXT_COLOR,
-            pos_hint={"center_x": 0.5, "center_y": 0.6},
-        )
-        overlay.add_widget(score_lbl)
-
         medal = Label(
             text="🏆" if hs > 0 else "—",
-            font_size="80sp",
-            pos_hint={"center_x": 0.5, "center_y": 0.72},
+            font_size="90sp",
+            pos_hint={"center_x": 0.5, "center_y": 0.68},
         )
         overlay.add_widget(medal)
 
-        overlay.add_widget(self.make_button("Назад", 0.25, self.show_menu))
+        score_lbl = Label(
+            text=f"{hs}",
+            font_size="52sp",
+            bold=True,
+            color=TEXT_COLOR,
+            pos_hint={"center_x": 0.5, "center_y": 0.56},
+        )
+        overlay.add_widget(score_lbl)
+
+        overlay.add_widget(self.make_btn("Назад", 0.22, self.show_menu, BTN_GREEN))
         self.scores_widget = overlay
         self.add_widget(overlay)
 
     def show_settings(self):
         self.clear_overlays()
         overlay = FloatLayout()
-        with overlay.canvas:
-            Color(0.05, 0.06, 0.12, 1)
-            Rectangle(pos=(0, 0), size=Window.size)
+        self.draw_bg(overlay, MENU_BG_TOP, MENU_BG_BOT)
 
         title = Label(
-            text="Настройки",
-            font_size="52sp",
+            text="НАСТРОЙКИ",
+            font_size="42sp",
             bold=True,
             color=ACCENT,
-            pos_hint={"center_x": 0.5, "center_y": 0.85},
+            outline_width=4,
+            outline_color=(0.3, 0.15, 0, 1),
+            pos_hint={"center_x": 0.5, "center_y": 0.9},
         )
         overlay.add_widget(title)
 
-        vib_state = "Вкл" if self.settings.get("vibration", True) else "Выкл"
-        vib_btn = self.make_button(f"Вибрация: {vib_state}", 0.6, self.toggle_vib)
-        overlay.add_widget(vib_btn)
+        # Иконки сверху: Sound / BGM / Vibration
+        icons_y = 0.79
+        sound_state = "🔊" if self.settings.get("sound", True) else "🔇"
+        bgm_state = "🎵" if self.settings.get("bgm", True) else "🎵"
+        vib_state = "📳" if self.settings.get("vibration", True) else "📴"
 
-        snd_state = "Вкл" if self.settings.get("sound", True) else "Выкл"
-        snd_btn = self.make_button(f"Звук: {snd_state}", 0.49, self.toggle_sound)
+        snd_btn = Button(
+            text=f"{sound_state}\nSound",
+            font_size="16sp",
+            size_hint=(0.22, 0.1),
+            pos_hint={"center_x": 0.2, "center_y": icons_y},
+            background_color=(*BTN_BG, 1),
+            background_normal="",
+            background_down="",
+        )
+        snd_btn.bind(on_release=self.toggle_sound)
         overlay.add_widget(snd_btn)
 
-        overlay.add_widget(self.make_button("Назад", 0.25, self.show_menu))
+        bgm_btn = Button(
+            text=f"{bgm_state}\nBGM",
+            font_size="16sp",
+            size_hint=(0.22, 0.1),
+            pos_hint={"center_x": 0.5, "center_y": icons_y},
+            background_color=(*BTN_BG, 1),
+            background_normal="",
+            background_down="",
+        )
+        bgm_btn.bind(on_release=self.toggle_bgm)
+        overlay.add_widget(bgm_btn)
+
+        vib_btn = Button(
+            text=f"{vib_state}\nVibration",
+            font_size="16sp",
+            size_hint=(0.22, 0.1),
+            pos_hint={"center_x": 0.8, "center_y": icons_y},
+            background_color=(*BTN_BG, 1),
+            background_normal="",
+            background_down="",
+        )
+        vib_btn.bind(on_release=self.toggle_vib)
+        overlay.add_widget(vib_btn)
+
+        # Кнопки-список
+        vol = self.settings.get("volume", 100)
+        vol_btn = self.make_btn(f"🔉 Громкость: {vol}%", 0.66, self.cycle_volume, BTN_BLUE, size=(0.72, 0.07), font="22sp")
+        overlay.add_widget(vol_btn)
+
+        gfx = self.settings.get("graphics", "high")
+        gfx_names = {"high": "Высокая", "medium": "Средняя", "low": "Низкая"}
+        gfx_btn = self.make_btn(f"🎨 Графика: {gfx_names.get(gfx, 'Высокая')}", 0.58, self.cycle_graphics, BTN_BLUE, size=(0.72, 0.07), font="22sp")
+        overlay.add_widget(gfx_btn)
+
+        reset_btn = self.make_btn("🏠 Сбросить рекорд", 0.49, self.confirm_reset, BTN_RED, size=(0.72, 0.07), font="22sp")
+        overlay.add_widget(reset_btn)
+
+        overlay.add_widget(self.make_btn("← Назад", 0.3, self.show_menu, BTN_GREEN))
         self.settings_widget = overlay
         self.add_widget(overlay)
 
@@ -668,8 +859,69 @@ class GameRoot(FloatLayout):
         save_settings(self.settings)
         self.show_settings()
 
+    def toggle_bgm(self, *a):
+        self.settings["bgm"] = not self.settings.get("bgm", True)
+        save_settings(self.settings)
+        self.show_settings()
+
+    def cycle_volume(self, *a):
+        volumes = [0, 25, 50, 75, 100]
+        cur = self.settings.get("volume", 100)
+        try:
+            idx = volumes.index(cur)
+        except ValueError:
+            idx = 4
+        self.settings["volume"] = volumes[(idx + 1) % len(volumes)]
+        save_settings(self.settings)
+        self.show_settings()
+
+    def cycle_graphics(self, *a):
+        modes = ["high", "medium", "low"]
+        cur = self.settings.get("graphics", "high")
+        try:
+            idx = modes.index(cur)
+        except ValueError:
+            idx = 0
+        self.settings["graphics"] = modes[(idx + 1) % len(modes)]
+        save_settings(self.settings)
+        self.show_settings()
+
+    def confirm_reset(self, *a):
+        self.clear_overlays()
+        overlay = FloatLayout()
+        self.draw_bg(overlay, MENU_BG_TOP, MENU_BG_BOT)
+        t = Label(
+            text="Сбросить рекорд?",
+            font_size="36sp",
+            bold=True,
+            color=TEXT_COLOR,
+            pos_hint={"center_x": 0.5, "center_y": 0.65},
+        )
+        overlay.add_widget(t)
+        i = Label(
+            text="Это нельзя отменить",
+            font_size="20sp",
+            color=(0.85, 0.85, 0.95, 1),
+            pos_hint={"center_x": 0.5, "center_y": 0.57},
+        )
+        overlay.add_widget(i)
+
+        overlay.add_widget(self.make_btn("Да, сбросить", 0.44, self.do_reset, BTN_RED))
+        overlay.add_widget(self.make_btn("Отмена", 0.33, self.show_settings, BTN_GREEN))
+        self.settings_widget = overlay
+        self.add_widget(overlay)
+
+    def do_reset(self, *a):
+        save_highscore(0)
+        if self.board:
+            self.board.highscore = 0
+        self.show_settings()
+
     def start_game(self, *a):
         self.clear_overlays()
+        for lbl in [self.score_label, self.record_label, self.pause_btn, self.hint_btn]:
+            if lbl and lbl.parent:
+                self.remove_widget(lbl)
         self.state = "game"
         self.board = Board(on_game_over=self.show_game_over)
         self.board.settings = self.settings
@@ -680,6 +932,8 @@ class GameRoot(FloatLayout):
             font_size="34sp",
             bold=True,
             color=TEXT_COLOR,
+            outline_width=3,
+            outline_color=(0, 0, 0, 1),
             pos_hint={"x": 0.03, "top": 0.98},
             size_hint=(0.6, 0.07),
             halign="left",
@@ -739,48 +993,45 @@ class GameRoot(FloatLayout):
                 self.record_label.text = f"Рекорд: {self.board.highscore}"
 
     def toggle_pause(self, *a):
-        if self.state != "game":
+        if self.state not in ("game", "paused"):
             return
         if self.pause_widget:
             self.remove_widget(self.pause_widget)
             self.pause_widget = None
-            self.board.disabled = False
             self.state = "game"
         else:
-            self.board.disabled = True
             self.state = "paused"
             overlay = FloatLayout()
             with overlay.canvas:
-                Color(0, 0, 0, 0.75)
+                Color(0, 0, 0, 0.78)
                 Rectangle(pos=(0, 0), size=Window.size)
             title = Label(
-                text="Пауза",
+                text="ПАУЗА",
                 font_size="56sp",
                 bold=True,
-                color=TEXT_COLOR,
+                color=ACCENT,
+                outline_width=5,
+                outline_color=(0.3, 0.15, 0, 1),
                 pos_hint={"center_x": 0.5, "center_y": 0.72},
             )
             overlay.add_widget(title)
-            overlay.add_widget(self.make_button("Продолжить", 0.5, self.toggle_pause, (0.35, 0.65, 0.4)))
-            overlay.add_widget(self.make_button("В меню", 0.38, self.go_menu_from_pause))
+            overlay.add_widget(self.make_btn("Продолжить", 0.5, self.toggle_pause, BTN_GREEN))
+            overlay.add_widget(self.make_btn("В меню", 0.38, self.go_menu))
             self.pause_widget = overlay
             self.add_widget(overlay)
 
-    def go_menu_from_pause(self, *a):
-        if self.pause_widget:
-            self.remove_widget(self.pause_widget)
-            self.pause_widget = None
+    def go_menu(self, *a):
+        self.clear_overlays()
         if self.board:
             self.remove_widget(self.board)
             self.board = None
+        for lbl in [self.score_label, self.record_label, self.pause_btn, self.hint_btn]:
+            if lbl and lbl.parent:
+                self.remove_widget(lbl)
         try:
-            self.remove_widget(self.score_label)
-            self.remove_widget(self.record_label)
-            self.remove_widget(self.pause_btn)
-            self.remove_widget(self.hint_btn)
+            Clock.unschedule(self.update_hud)
         except Exception:
             pass
-        Clock.unschedule(self.update_hud)
         self.show_menu()
 
     def show_game_over(self):
@@ -789,23 +1040,26 @@ class GameRoot(FloatLayout):
         hs = load_highscore()
         overlay = FloatLayout()
         with overlay.canvas:
-            Color(0, 0, 0, 0.82)
+            Color(0, 0, 0, 0.85)
             Rectangle(pos=(0, 0), size=Window.size)
 
         title = Label(
-            text="Игра окончена",
-            font_size="56sp",
+            text="ИГРА ОКОНЧЕНА",
+            font_size="48sp",
             bold=True,
-            color=TEXT_COLOR,
-            pos_hint={"center_x": 0.5, "center_y": 0.74},
+            color=(1, 0.4, 0.4, 1),
+            outline_width=4,
+            outline_color=(0.3, 0, 0, 1),
+            pos_hint={"center_x": 0.5, "center_y": 0.78},
         )
         overlay.add_widget(title)
 
         score_lbl = Label(
             text=f"Очки: {self.board.score}",
-            font_size="36sp",
+            font_size="38sp",
+            bold=True,
             color=TEXT_COLOR,
-            pos_hint={"center_x": 0.5, "center_y": 0.6},
+            pos_hint={"center_x": 0.5, "center_y": 0.64},
         )
         overlay.add_widget(score_lbl)
 
@@ -813,22 +1067,22 @@ class GameRoot(FloatLayout):
             text=f"Рекорд: {hs}",
             font_size="30sp",
             color=ACCENT,
-            pos_hint={"center_x": 0.5, "center_y": 0.52},
+            pos_hint={"center_x": 0.5, "center_y": 0.56},
         )
         overlay.add_widget(record_lbl)
 
         if self.board.score >= hs and self.board.score > 0:
-            new_record = Label(
-                text="✨ Новый рекорд! ✨",
-                font_size="24sp",
+            nr = Label(
+                text="✨ НОВЫЙ РЕКОРД! ✨",
+                font_size="26sp",
                 bold=True,
                 color=ACCENT,
-                pos_hint={"center_x": 0.5, "center_y": 0.45},
+                pos_hint={"center_x": 0.5, "center_y": 0.48},
             )
-            overlay.add_widget(new_record)
+            overlay.add_widget(nr)
 
-        overlay.add_widget(self.make_button("Играть заново", 0.32, self.restart_game, (0.35, 0.65, 0.4)))
-        overlay.add_widget(self.make_button("В меню", 0.21, self.go_menu_from_pause))
+        overlay.add_widget(self.make_btn("Играть заново", 0.35, self.restart_game, BTN_GREEN))
+        overlay.add_widget(self.make_btn("В меню", 0.24, self.go_menu))
         self.game_over_widget = overlay
         self.add_widget(overlay)
 
@@ -840,9 +1094,9 @@ class GameRoot(FloatLayout):
             self.board.reset()
             self.board.highscore = load_highscore()
             self.board.settings = self.settings
-
-    def exit_app(self, *a):
-        App.get_running_app().stop()
+            self.board.stats = load_stats()
+            self.board.game_start_time = datetime.now()
+        self.state = "game"
 
 
 class BlockBlastApp(App):
