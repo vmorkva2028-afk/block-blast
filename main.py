@@ -12,10 +12,7 @@ from kivy.graphics import Color, Rectangle, RoundedRectangle, Ellipse
 from kivy.core.window import Window
 from kivy.clock import Clock
 from kivy.metrics import dp
-
-# ============================================================
-# ЧАСТЬ 1: КОНСТАНТЫ, СОХРАНЕНИЯ, БАЗОВЫЕ КЛАССЫ
-# ============================================================
+from bonuses import BonusManager, explode, BONUS_LIMITS, BONUS_SYMBOLS, BONUS_NAMES, BONUS_COLORS
 
 GRID_N = 8
 
@@ -118,8 +115,6 @@ def save_stats(s):
     save_json(STATS_FILE, s)
 
 
-# ---------- Вспомогательные объекты ----------
-
 class Particle:
     def __init__(self, x, y, color):
         self.x = x
@@ -165,19 +160,13 @@ class Piece:
         return mr, mc
 
 
-# ============================================================
-# КОНЕЦ ЧАСТИ 1
-# ============================================================
-# ============================================================
-# ЧАСТЬ 2: ИГРОВОЕ ПОЛЕ (Board)
-# ============================================================
-
 class Board(Widget):
     def __init__(self, on_game_over=None, **kwargs):
         super().__init__(**kwargs)
         self.on_game_over = on_game_over
         self.settings = load_settings()
         self.stats = load_stats()
+        self.bonus = BonusManager()
         self.reset()
         self.highscore = load_highscore()
         self.bind(pos=self.update_layout, size=self.update_layout)
@@ -212,6 +201,10 @@ class Board(Widget):
         self.pulse_t = 0.0
         self.time = 0.0
         self.hint_t = 0.0
+        self.bonus.reset()
+        self.touch_x = 0
+        self.touch_y = 0
+        self.bomb_mode = False
 
     def _new_piece(self):
         skin = self.settings.get("skin", "classic")
@@ -357,6 +350,24 @@ class Board(Widget):
     def on_touch_down(self, touch):
         if self.game_over or self.dragging is not None or self.refilling:
             return False
+
+        if self.bonus.active == "bomb":
+            row, col = self.cell_at(touch.x, touch.y)
+            if 0 <= row < GRID_N and 0 <= col < GRID_N:
+                cleared = explode(self.board, row, col)
+                for (r, c, color) in cleared:
+                    self.clear_anim.append([r, c, color, 0.0])
+                    if self.settings.get("graphics", "high") == "high":
+                        px = self.board_x + c * self.cell + self.cell / 2
+                        py = self.board_y + r * self.cell + self.cell / 2
+                        for _ in range(4):
+                            self.particles.append(Particle(px, py, color))
+                self.bonus.use("bomb")
+                self.bonus.active = None
+                self.shake_t = 0.2
+                self.vibrate(50)
+            return True
+
         slot_w = self.width / 3
         for i, p in enumerate(self.tray):
             if p is None or self.tray_used[i]:
@@ -401,6 +412,7 @@ class Board(Widget):
             row -= mr // 2
             col -= mc // 2
             if self.can_place(p.shape, row, col):
+                self.bonus.push_history(self.board, self.score)
                 for dr, dc in p.shape:
                     self.board[row + dr][col + dc] = p.color
                     self.drop_anim.append([row + dr, col + dc, p.color, 0.0])
@@ -487,6 +499,7 @@ class Board(Widget):
             self.pulse_t = max(0, self.pulse_t - dt)
         if self.hint_t > 0:
             self.hint_t = max(0, self.hint_t - dt)
+        self.bonus.tick(dt)
         self.redraw()
 
     def redraw(self):
@@ -582,6 +595,13 @@ class Board(Widget):
                 Ellipse(pos=(t.x - t.size / 2, t.y - t.size / 2),
                         size=(t.size, t.size))
 
+            if self.bonus.active == "bomb":
+                Color(1, 0.3, 0.3, 0.2 + 0.15 * abs(math.sin(self.time * 10)))
+                RoundedRectangle(
+                    pos=(self.board_x - 8, self.board_y - 8),
+                    size=(self.cell * GRID_N + 16, self.cell * GRID_N + 16),
+                    radius=[20])
+
             if self.hint_t > 0:
                 hint = self.find_hint()
                 if hint:
@@ -660,13 +680,6 @@ class Board(Widget):
                          radius=[10])
 
 
-# ============================================================
-# КОНЕЦ ЧАСТИ 2
-# ============================================================
-# ============================================================
-# ЧАСТЬ 3: ИНТЕРФЕЙС (GameRoot) + APP
-# ============================================================
-
 class GameRoot(FloatLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -682,6 +695,7 @@ class GameRoot(FloatLayout):
         self.record_label = None
         self.pause_btn = None
         self.hint_btn = None
+        self.bonus_btns = {}
         self.show_menu()
 
     def make_btn(self, text, y, cb, color=BTN_BG, size=(0.7, 0.08), font="26sp"):
@@ -704,7 +718,9 @@ class GameRoot(FloatLayout):
         self.game_over_widget = None
 
     def clear_game(self):
-        for w in [self.board, self.score_label, self.record_label, self.pause_btn, self.hint_btn]:
+        bonus_list = list(self.bonus_btns.values())
+        for w in [self.board, self.score_label, self.record_label,
+                  self.pause_btn, self.hint_btn] + bonus_list:
             if w and w.parent:
                 self.remove_widget(w)
         self.board = None
@@ -712,6 +728,7 @@ class GameRoot(FloatLayout):
         self.record_label = None
         self.pause_btn = None
         self.hint_btn = None
+        self.bonus_btns = {}
         try:
             Clock.unschedule(self.update_hud)
         except Exception:
@@ -940,31 +957,50 @@ class GameRoot(FloatLayout):
         self.board.settings = self.settings
         self.add_widget(self.board)
 
-        self.score_label = Label(text="Очки: 0", font_size="32sp", bold=True,
+        self.score_label = Label(text="Очки: 0", font_size="30sp", bold=True,
                                  color=TEXT_COLOR, pos_hint={"x": 0.03, "top": 0.98},
                                  size_hint=(0.5, 0.06), halign="left", valign="middle")
         self.record_label = Label(text="Рекорд: " + str(load_highscore()),
-                                  font_size="20sp", color=ACCENT,
-                                  pos_hint={"right": 0.97, "top": 0.98},
+                                  font_size="18sp", color=ACCENT,
+                                  pos_hint={"right": 0.86, "top": 0.98},
                                   size_hint=(0.4, 0.06), halign="right", valign="middle")
         self.add_widget(self.score_label)
         self.add_widget(self.record_label)
 
-        self.pause_btn = Button(text="II", font_size="22sp", bold=True,
-                                size_hint=(None, None), size=(dp(60), dp(60)),
-                                pos_hint={"right": 0.97, "top": 0.90},
+        # Пауза — маленькая, сверху справа
+        self.pause_btn = Button(text="II", font_size="16sp", bold=True,
+                                size_hint=(None, None), size=(dp(42), dp(42)),
+                                pos_hint={"right": 0.97, "top": 0.975},
                                 background_color=(BTN_BG[0], BTN_BG[1], BTN_BG[2], 1),
                                 background_normal="", background_down="")
         self.pause_btn.bind(on_release=self.toggle_pause)
         self.add_widget(self.pause_btn)
 
-        self.hint_btn = Button(text="?", font_size="22sp", bold=True,
-                               size_hint=(None, None), size=(dp(60), dp(60)),
-                               pos_hint={"right": 0.97, "top": 0.82},
+        # Подсказка — маленькая, сверху справа
+        self.hint_btn = Button(text="?", font_size="16sp", bold=True,
+                               size_hint=(None, None), size=(dp(42), dp(42)),
+                               pos_hint={"right": 0.97, "top": 0.92},
                                background_color=(0.5, 0.4, 0.7, 1),
                                background_normal="", background_down="")
         self.hint_btn.bind(on_release=self.use_hint)
         self.add_widget(self.hint_btn)
+
+        # Кнопки бонусов слева вертикально
+        self.bonus_btns = {}
+        y_start = 0.9
+        for i, key in enumerate(["bomb", "shuffle", "freeze", "undo"]):
+            btn = Button(
+                text=BONUS_SYMBOLS[key] + str(BONUS_LIMITS[key]),
+                font_size="14sp",
+                bold=True,
+                size_hint=(None, None),
+                size=(dp(40), dp(40)),
+                pos_hint={"x": 0.03, "top": y_start - i * 0.06},
+                background_color=(*BONUS_COLORS[key], 1),
+                background_normal="", background_down="")
+            btn.bind(on_release=lambda inst, k=key: self.use_bonus(k))
+            self.add_widget(btn)
+            self.bonus_btns[key] = btn
 
         Clock.schedule_interval(self.update_hud, 0.1)
 
@@ -972,12 +1008,51 @@ class GameRoot(FloatLayout):
         if self.board:
             self.board.hint_t = 2.0
 
+    def use_bonus(self, key):
+        if not self.board:
+            return
+        b = self.board.bonus
+        result = b.select(key)
+        if result == "shuffle":
+            b.use("shuffle")
+            self.board.tray = [self.board._new_piece() for _ in range(3)]
+            self.board.tray_used = [False, False, False]
+            self.board.tray_spawn_t = [0.0, 0.0, 0.0]
+            self.board.position_tray()
+            self.board.vibrate(30)
+        elif result == "undo":
+            snapshot = b.pop_history()
+            if snapshot:
+                b.use("undo")
+                board_state, score = snapshot
+                self.board.board = board_state
+                self.board.score = score
+                self.board.vibrate(30)
+        elif result == "freeze":
+            b.use("freeze")
+            b.freeze_timer = 10.0
+            self.board.vibrate(30)
+        self._update_bonus_buttons()
+
+    def _update_bonus_buttons(self):
+        if not self.bonus_btns or not self.board:
+            return
+        for key, btn in self.bonus_btns.items():
+            count = self.board.bonus.counts.get(key, 0)
+            if count <= 0:
+                btn.text = BONUS_SYMBOLS[key]
+                btn.background_color = (0.3, 0.3, 0.35, 1)
+            else:
+                btn.text = BONUS_SYMBOLS[key] + str(count)
+                btn.background_color = (*BONUS_COLORS[key], 1)
+
     def update_hud(self, dt):
         try:
             if self.board and self.state == "game":
                 self.score_label.text = "Очки: " + str(self.board.score)
                 if self.board.highscore > 0:
                     self.record_label.text = "Рекорд: " + str(self.board.highscore)
+                self._update_bonus_buttons()
         except Exception:
             pass
 
@@ -1046,7 +1121,3 @@ class BlockBlastApp(App):
 
 if __name__ == "__main__":
     BlockBlastApp().run()
-
-# ============================================================
-# КОНЕЦ ЧАСТИ 3 (все три части = полный main.py)
-# ============================================================
