@@ -12,16 +12,14 @@ from kivy.graphics import Color, Rectangle, RoundedRectangle, Ellipse
 from kivy.core.window import Window
 from kivy.clock import Clock
 from kivy.metrics import dp
-from bonuses import BonusManager, explode, BONUS_LIMITS, BONUS_SYMBOLS, BONUS_NAMES, BONUS_COLORS
+from kivy.core.audio import SoundLoader
+from bonuses import BonusManager, explode, BONUS_LIMITS, BONUS_SYMBOLS, BONUS_COLORS
 
 GRID_N = 8
 
 SHAPES = [
-    [(0, 0)],
-    [(0, 0), (0, 1)],
-    [(0, 0), (1, 0)],
-    [(0, 0), (0, 1), (0, 2)],
-    [(0, 0), (1, 0), (2, 0)],
+    [(0, 0)], [(0, 0), (0, 1)], [(0, 0), (1, 0)],
+    [(0, 0), (0, 1), (0, 2)], [(0, 0), (1, 0), (2, 0)],
     [(0, 0), (0, 1), (0, 2), (0, 3)],
     [(0, 0), (0, 1), (1, 0), (1, 1)],
     [(0, 0), (0, 1), (1, 0)],
@@ -30,18 +28,12 @@ SHAPES = [
 ]
 
 SKINS = {
-    "classic": [
-        (1.0, 0.35, 0.35), (0.35, 0.78, 1.0), (1.0, 0.78, 0.31),
-        (0.59, 1.0, 0.47), (0.78, 0.47, 1.0), (1.0, 0.59, 0.35), (0.39, 1.0, 0.78),
-    ],
-    "wood": [
-        (0.72, 0.42, 0.24), (0.85, 0.62, 0.35), (0.60, 0.35, 0.18),
-        (0.95, 0.78, 0.50), (0.80, 0.55, 0.30), (0.68, 0.40, 0.22), (0.90, 0.70, 0.42),
-    ],
-    "neon": [
-        (1.0, 0.10, 0.60), (0.20, 1.0, 0.90), (1.0, 0.95, 0.20),
-        (0.30, 1.0, 0.30), (0.80, 0.30, 1.0), (1.0, 0.40, 0.20), (0.20, 0.80, 1.0),
-    ],
+    "classic": [(1.0, 0.35, 0.35), (0.35, 0.78, 1.0), (1.0, 0.78, 0.31),
+                (0.59, 1.0, 0.47), (0.78, 0.47, 1.0), (1.0, 0.59, 0.35), (0.39, 1.0, 0.78)],
+    "wood": [(0.72, 0.42, 0.24), (0.85, 0.62, 0.35), (0.60, 0.35, 0.18),
+             (0.95, 0.78, 0.50), (0.80, 0.55, 0.30), (0.68, 0.40, 0.22), (0.90, 0.70, 0.42)],
+    "neon": [(1.0, 0.10, 0.60), (0.20, 1.0, 0.90), (1.0, 0.95, 0.20),
+             (0.30, 1.0, 0.30), (0.80, 0.30, 1.0), (1.0, 0.40, 0.20), (0.20, 0.80, 1.0)],
 }
 
 BG_TOP = (0.10, 0.12, 0.22)
@@ -115,6 +107,16 @@ def save_stats(s):
     save_json(STATS_FILE, s)
 
 
+def load_sound(name):
+    try:
+        path = os.path.join(DIR, name)
+        if os.path.exists(path):
+            return SoundLoader.load(path)
+    except Exception:
+        pass
+    return None
+
+
 class Particle:
     def __init__(self, x, y, color):
         self.x = x
@@ -167,11 +169,29 @@ class Board(Widget):
         self.settings = load_settings()
         self.stats = load_stats()
         self.bonus = BonusManager()
+        self.snd_click = load_sound("click.wav")
+        self.snd_place = load_sound("place.wav")
+        self.snd_clear1 = load_sound("clear1.wav")
+        self.snd_clear2 = load_sound("clear2.wav")
+        self.snd_clear3 = load_sound("clear3.wav")
+        self.snd_over = load_sound("gameover.wav")
         self.reset()
         self.highscore = load_highscore()
         self.bind(pos=self.update_layout, size=self.update_layout)
         Clock.schedule_interval(self.tick, 1 / 60)
         self.game_start_time = datetime.now()
+
+    def play(self, snd):
+        if not self.settings.get("sound", True):
+            return
+        if snd is None:
+            return
+        try:
+            vol = self.settings.get("volume", 100) / 100.0
+            snd.volume = vol
+            snd.play()
+        except Exception:
+            pass
 
     def reset(self):
         self.board = [[0] * GRID_N for _ in range(GRID_N)]
@@ -202,13 +222,9 @@ class Board(Widget):
         self.time = 0.0
         self.hint_t = 0.0
         self.bonus.reset()
-        self.touch_x = 0
-        self.touch_y = 0
-        self.bomb_mode = False
 
     def _new_piece(self):
-        skin = self.settings.get("skin", "classic")
-        return Piece(skin)
+        return Piece(self.settings.get("skin", "classic"))
 
     def update_layout(self, *args):
         w = min(self.width, self.height)
@@ -292,6 +308,13 @@ class Board(Widget):
         self.stats["max_combo"] = max(self.stats.get("max_combo", 0), self.combo)
 
         if lines > 0:
+            if lines == 1:
+                self.play(self.snd_clear1)
+            elif lines == 2:
+                self.play(self.snd_clear2)
+            else:
+                self.play(self.snd_clear3)
+
             popup_text = "+" + str(gained)
             if self.combo > 1:
                 popup_text += " x" + str(self.combo)
@@ -365,6 +388,7 @@ class Board(Widget):
                 self.bonus.use("bomb")
                 self.bonus.active = None
                 self.shake_t = 0.2
+                self.play(self.snd_clear3)
                 self.vibrate(50)
             return True
 
@@ -378,6 +402,7 @@ class Board(Widget):
                 self.drag_moved = False
                 self.drag_dx = touch.x - p.x
                 self.drag_dy = touch.y - p.y
+                self.play(self.snd_click)
                 return True
         return False
 
@@ -417,6 +442,7 @@ class Board(Widget):
                     self.board[row + dr][col + dc] = p.color
                     self.drop_anim.append([row + dr, col + dc, p.color, 0.0])
                 self.clear_lines()
+                self.play(self.snd_place)
                 self.tray_used[self.dragging] = True
                 self.tray[self.dragging] = None
                 self.tray_spawn_t[self.dragging] = 1.0
@@ -433,6 +459,7 @@ class Board(Widget):
 
         if not self.refilling and not self.any_move_possible():
             self.game_over = True
+            self.play(self.snd_over)
             if self.score > self.highscore:
                 self.highscore = self.score
                 save_highscore(self.highscore)
@@ -462,6 +489,7 @@ class Board(Widget):
         self.position_tray()
         if not self.any_move_possible():
             self.game_over = True
+            self.play(self.snd_over)
             if self.score > self.highscore:
                 self.highscore = self.score
                 save_highscore(self.highscore)
@@ -527,20 +555,17 @@ class Board(Widget):
                 extra = int(8 * abs(math.sin(self.pulse_t * 14)))
                 pad += extra
             Color(*GRID_BG)
-            RoundedRectangle(
-                pos=(self.board_x - pad + shake_x, self.board_y - pad + shake_y),
-                size=(self.cell * GRID_N + pad * 2, self.cell * GRID_N + pad * 2),
-                radius=[18])
+            RoundedRectangle(pos=(self.board_x - pad + shake_x, self.board_y - pad + shake_y),
+                             size=(self.cell * GRID_N + pad * 2, self.cell * GRID_N + pad * 2),
+                             radius=[18])
             Color(*CELL_BORDER)
-            RoundedRectangle(
-                pos=(self.board_x - pad + shake_x, self.board_y - pad + shake_y),
-                size=(self.cell * GRID_N + pad * 2, self.cell * GRID_N + pad * 2),
-                radius=[18])
+            RoundedRectangle(pos=(self.board_x - pad + shake_x, self.board_y - pad + shake_y),
+                             size=(self.cell * GRID_N + pad * 2, self.cell * GRID_N + pad * 2),
+                             radius=[18])
             Color(*GRID_BG)
-            RoundedRectangle(
-                pos=(self.board_x - pad + 3 + shake_x, self.board_y - pad + 3 + shake_y),
-                size=(self.cell * GRID_N + pad * 2 - 6, self.cell * GRID_N + pad * 2 - 6),
-                radius=[15])
+            RoundedRectangle(pos=(self.board_x - pad + 3 + shake_x, self.board_y - pad + 3 + shake_y),
+                             size=(self.cell * GRID_N + pad * 2 - 6, self.cell * GRID_N + pad * 2 - 6),
+                             radius=[15])
 
             for r in range(GRID_N):
                 for c in range(GRID_N):
@@ -597,10 +622,9 @@ class Board(Widget):
 
             if self.bonus.active == "bomb":
                 Color(1, 0.3, 0.3, 0.2 + 0.15 * abs(math.sin(self.time * 10)))
-                RoundedRectangle(
-                    pos=(self.board_x - 8, self.board_y - 8),
-                    size=(self.cell * GRID_N + 16, self.cell * GRID_N + 16),
-                    radius=[20])
+                RoundedRectangle(pos=(self.board_x - 8, self.board_y - 8),
+                                 size=(self.cell * GRID_N + 16, self.cell * GRID_N + 16),
+                                 radius=[20])
 
             if self.hint_t > 0:
                 hint = self.find_hint()
@@ -699,12 +723,10 @@ class GameRoot(FloatLayout):
         self.show_menu()
 
     def make_btn(self, text, y, cb, color=BTN_BG, size=(0.7, 0.08), font="26sp"):
-        btn = Button(
-            text=text, font_size=font, bold=True,
-            size_hint=size,
-            pos_hint={"center_x": 0.5, "center_y": y},
-            background_color=(color[0], color[1], color[2], 1),
-            background_normal="", background_down="")
+        btn = Button(text=text, font_size=font, bold=True, size_hint=size,
+                     pos_hint={"center_x": 0.5, "center_y": y},
+                     background_color=(color[0], color[1], color[2], 1),
+                     background_normal="", background_down="")
         btn.bind(on_release=cb)
         return btn
 
@@ -745,7 +767,6 @@ class GameRoot(FloatLayout):
         self.state = "menu"
         overlay = FloatLayout()
         self.make_bg(overlay)
-
         overlay.add_widget(Label(text="BLOCK", font_size="68sp", bold=True,
                                  color=(1, 0.65, 0.1, 1),
                                  pos_hint={"center_x": 0.5, "center_y": 0.86}))
@@ -759,7 +780,6 @@ class GameRoot(FloatLayout):
                                  font_size="20sp", bold=True,
                                  color=(1, 0.9, 0.4, 1),
                                  pos_hint={"center_x": 0.5, "center_y": 0.62}))
-
         overlay.add_widget(self.make_btn("КЛАССИК", 0.5, self.start_game, BTN_GREEN,
                                          size=(0.72, 0.09), font="28sp"))
         overlay.add_widget(self.make_btn("СТАТИСТИКА", 0.4, self.show_stats, BTN_ORANGE,
@@ -819,11 +839,9 @@ class GameRoot(FloatLayout):
         self.make_bg(overlay)
         overlay.add_widget(Label(text="НАСТРОЙКИ", font_size="42sp", bold=True,
                                  color=ACCENT, pos_hint={"center_x": 0.5, "center_y": 0.9}))
-
         sound_on = self.settings.get("sound", True)
         bgm_on = self.settings.get("bgm", True)
         vib_on = self.settings.get("vibration", True)
-
         snd = Button(text="Sound\n" + ("ON" if sound_on else "OFF"),
                      font_size="18sp", bold=True, size_hint=(0.28, 0.1),
                      pos_hint={"center_x": 0.19, "center_y": 0.78},
@@ -831,7 +849,6 @@ class GameRoot(FloatLayout):
                      background_normal="", background_down="")
         snd.bind(on_release=self.toggle_sound)
         overlay.add_widget(snd)
-
         bgm = Button(text="BGM\n" + ("ON" if bgm_on else "OFF"),
                      font_size="18sp", bold=True, size_hint=(0.28, 0.1),
                      pos_hint={"center_x": 0.5, "center_y": 0.78},
@@ -839,7 +856,6 @@ class GameRoot(FloatLayout):
                      background_normal="", background_down="")
         bgm.bind(on_release=self.toggle_bgm)
         overlay.add_widget(bgm)
-
         vib = Button(text="Vib\n" + ("ON" if vib_on else "OFF"),
                      font_size="18sp", bold=True, size_hint=(0.28, 0.1),
                      pos_hint={"center_x": 0.81, "center_y": 0.78},
@@ -847,25 +863,20 @@ class GameRoot(FloatLayout):
                      background_normal="", background_down="")
         vib.bind(on_release=self.toggle_vib)
         overlay.add_widget(vib)
-
         vol = self.settings.get("volume", 100)
         overlay.add_widget(self.make_btn("Громкость: " + str(vol) + "%", 0.65,
                                          self.cycle_volume, BTN_BLUE, size=(0.72, 0.07), font="22sp"))
-
         gfx = self.settings.get("graphics", "high")
         gfx_names = {"high": "Высокая", "medium": "Средняя", "low": "Низкая"}
         overlay.add_widget(self.make_btn("Графика: " + gfx_names.get(gfx, "Высокая"), 0.57,
                                          self.cycle_graphics, BTN_BLUE, size=(0.72, 0.07), font="22sp"))
-
         skin = self.settings.get("skin", "classic")
         skin_names = {"classic": "Классика", "wood": "Дерево", "neon": "Неон"}
         overlay.add_widget(self.make_btn("Скин: " + skin_names.get(skin, "Классика"), 0.49,
                                          self.cycle_skin, (0.5, 0.4, 0.7), size=(0.72, 0.07), font="22sp"))
-
         trail_on = self.settings.get("trail", True)
         overlay.add_widget(self.make_btn("Trail: " + ("ON" if trail_on else "OFF"), 0.41,
                                          self.toggle_trail, (0.5, 0.4, 0.7), size=(0.72, 0.07), font="22sp"))
-
         overlay.add_widget(self.make_btn("Сбросить рекорд", 0.33, self.confirm_reset, BTN_RED,
                                          size=(0.72, 0.07), font="22sp"))
         overlay.add_widget(self.make_btn("Назад", 0.21, self.show_menu, BTN_GREEN,
@@ -967,7 +978,6 @@ class GameRoot(FloatLayout):
         self.add_widget(self.score_label)
         self.add_widget(self.record_label)
 
-        # Пауза — маленькая, сверху справа
         self.pause_btn = Button(text="II", font_size="16sp", bold=True,
                                 size_hint=(None, None), size=(dp(42), dp(42)),
                                 pos_hint={"right": 0.97, "top": 0.975},
@@ -976,7 +986,6 @@ class GameRoot(FloatLayout):
         self.pause_btn.bind(on_release=self.toggle_pause)
         self.add_widget(self.pause_btn)
 
-        # Подсказка — маленькая, сверху справа
         self.hint_btn = Button(text="?", font_size="16sp", bold=True,
                                size_hint=(None, None), size=(dp(42), dp(42)),
                                pos_hint={"right": 0.97, "top": 0.92},
@@ -985,19 +994,15 @@ class GameRoot(FloatLayout):
         self.hint_btn.bind(on_release=self.use_hint)
         self.add_widget(self.hint_btn)
 
-        # Кнопки бонусов слева вертикально
         self.bonus_btns = {}
         y_start = 0.9
         for i, key in enumerate(["bomb", "shuffle", "freeze", "undo"]):
-            btn = Button(
-                text=BONUS_SYMBOLS[key] + str(BONUS_LIMITS[key]),
-                font_size="14sp",
-                bold=True,
-                size_hint=(None, None),
-                size=(dp(40), dp(40)),
-                pos_hint={"x": 0.03, "top": y_start - i * 0.06},
-                background_color=(*BONUS_COLORS[key], 1),
-                background_normal="", background_down="")
+            btn = Button(text=BONUS_SYMBOLS[key] + str(BONUS_LIMITS[key]),
+                         font_size="14sp", bold=True,
+                         size_hint=(None, None), size=(dp(40), dp(40)),
+                         pos_hint={"x": 0.03, "top": y_start - i * 0.06},
+                         background_color=(*BONUS_COLORS[key], 1),
+                         background_normal="", background_down="")
             btn.bind(on_release=lambda inst, k=key: self.use_bonus(k))
             self.add_widget(btn)
             self.bonus_btns[key] = btn
